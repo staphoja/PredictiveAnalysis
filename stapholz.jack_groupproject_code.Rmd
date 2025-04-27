@@ -1,0 +1,403 @@
+---
+title: "stapholz.jack_groupproject"
+author: "Jack Stapholz"
+date: "2023-11-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(MASS)
+library(boot)
+library(caret)
+library(class)
+library(crossval)
+library(dbplyr)
+library(tidyverse)
+library(GGally)
+library(glmnet)
+library(ggfortify)
+library(ISLR)
+library(lattice)
+library(stats)
+library(mosaic)
+library(VIM)
+library(readr)
+library(Fgmutils)
+library(pls)
+library(splines)
+library(gam)
+library(akima)
+library(tree)
+library(neuralnet)
+library(DescTools)
+```
+
+```{css, echo = FALSE}
+h1, h2 {
+  text-align: center;
+}
+```
+
+```{R data}
+TrainSAData <- read.csv(file = "../Data/TrainSAData2.csv")
+TestSADataNoY <- read.csv(file = "../Data/TestSAData2NoY.csv")
+kaggleSampleSolution <- read.csv(file = "../Data/SampleSolution.csv")
+
+TrainSAData$sex <- as.factor(TrainSAData$sex)
+TrainSAData$hear_left <- as.factor(TrainSAData$hear_left)
+TrainSAData$hear_right <- as.factor(TrainSAData$hear_right)
+TrainSAData$BMI.Category <- as.factor(TrainSAData$BMI.Category)
+TrainSAData$AGE.Category <- as.factor(TrainSAData$AGE.Category)
+TrainSAData$Smoking.Status <- as.factor(TrainSAData$Smoking.Status)
+
+TestSADataNoY$sex <- as.factor(TestSADataNoY$sex)
+TestSADataNoY$hear_left <- as.factor(TestSADataNoY$hear_left)
+TestSADataNoY$hear_right <- as.factor(TestSADataNoY$hear_right)
+TestSADataNoY$BMI.Category <- as.factor(TestSADataNoY$BMI.Category)
+TestSADataNoY$AGE.Category <- as.factor(TestSADataNoY$AGE.Category)
+TestSADataNoY$Smoking.Status <- as.factor(TestSADataNoY$Smoking.Status)
+```
+
+```{R remove NA}
+#Removing NAs from Training Data
+TrainSAData[sapply(TrainSAData, is.numeric)] <- lapply(TrainSAData[sapply(TrainSAData, is.numeric)], function(x) ifelse(is.na(x), median(x, na.rm = TRUE), x))
+TrainSAData[sapply(TrainSAData, is.factor)] <- lapply(TrainSAData[sapply(TrainSAData, is.factor)], function(x) ifelse(is.na(x), Mode(x, na.rm = TRUE), x))
+
+#Removing NAs from Testing Data
+TestSADataNoY[sapply(TestSADataNoY, is.numeric)] <- lapply(TestSADataNoY[sapply(TestSADataNoY, is.numeric)], function(x) ifelse(is.na(x), median(x, na.rm = TRUE), x))
+TestSADataNoY[sapply(TestSADataNoY, is.factor)] <- lapply(TestSADataNoY[sapply(TestSADataNoY, is.factor)], function(x) ifelse(is.na(x), Mode(x, na.rm = TRUE), x))
+```
+
+```{R Hmisc 1}
+hmiscTrain <- read.csv("../Data/HmiscTrain.csv")
+hmiscTest <- read.csv("../Data/HmiscTest.csv")
+```
+
+```{R}
+hmisclm <- lm(Alcoholic.Status == "Y" ~ ., data = hmiscTrain)
+summary(hmisclm)
+```
+
+```{R Hmisc 4, warning = FALSE}
+hmiscgam3deg <- gam(Alcoholic.Status == "Y" ~ sex + ns(age, 3) + ns(height, 3) + ns(weight, 3) + ns(waistline, 3) + ns(sight_left, 3) + ns(sight_right, 3) + hear_left + hear_right + ns(SBP, 3) + ns(DBP, 3) + ns(BLDS, 3) + ns(tot_chole, 3) + ns(HDL_chole, 3) + ns(LDL_chole, 3) + ns(triglyceride, 3) + ns(hemoglobin, 3) + ns(urine_protein, 3) + ns(serum_creatinine, 3) + ns(SGOT_AST, 3) + ns(SGOT_ALT, 3) + ns(gamma_GTP, 3) + ns(BMI, 3) + BMI.Category + AGE.Category + Smoking.Status, data = hmiscTrain)
+par(mfrow = c(1, 2))
+plot(hmiscgam3deg, se = TRUE, col = "blue")
+summary(hmiscgam3deg)
+
+hmiscgam3deg.trainPredict <- predict(hmiscgam3deg, hmiscTrain)
+hmiscgam3deg.trainPredict[hmiscgam3deg.trainPredict > 0.5] <- 'Y'
+hmiscgam3deg.trainPredict[hmiscgam3deg.trainPredict != 'Y'] <- 'N'
+sum(hmiscgam3deg.trainPredict == hmiscTrain$Alcoholic.Status) / length(hmiscgam3deg.trainPredict)
+
+hmiscgam3deg.predict <- predict(hmiscgam3deg, hmiscTest)
+
+hmiscgam3deg.predict[hmiscgam3deg.predict > 0.5] <- 'Y'
+hmiscgam3deg.predict[hmiscgam3deg.predict != 'Y'] <- 'N'
+
+hmiscgam3deg.predict <- as.data.frame(cbind("ID" = 1:30000, "Alcoholic.Status" = hmiscgam3deg.predict))
+write.csv(hmiscgam3deg.predict, file = "stapholz.jack_kaggle2.csv", row.names = FALSE)
+```
+
+```{R Hmisc 8, warning = FALSE}
+hmiscgamfull <- gam(Alcoholic.Status == "Y" ~ sex + ns(age, 6) + ns(height, 6) + ns(weight, 6) + ns(waistline, 6) + ns(sight_left, 6) + ns(sight_right, 6) + hear_left + hear_right + ns(SBP, 6) + ns(DBP, 6) + ns(BLDS, 6) + ns(tot_chole, 6) + ns(HDL_chole, 6) + ns(LDL_chole, 6) + ns(triglyceride, 6) + ns(hemoglobin, 6) + ns(urine_protein, 6) + ns(serum_creatinine, 6) + ns(SGOT_AST, 6) + ns(SGOT_ALT, 6) + ns(gamma_GTP, 6) + ns(BMI, 6) + BMI.Category + AGE.Category + Smoking.Status, data = hmiscTrain)
+par(mfrow = c(1, 2))
+plot(hmiscgamfull, se = TRUE, col = "blue")
+summary(hmiscgamfull)
+
+hmiscgamfull.trainPredict <- predict(hmiscgamfull, hmiscTrain)
+hmiscgamfull.trainPredict[hmiscgamfull.trainPredict > 0.5] <- 'Y'
+hmiscgamfull.trainPredict[hmiscgamfull.trainPredict != 'Y'] <- 'N'
+sum(hmiscgamfull.trainPredict == hmiscTrain$Alcoholic.Status) / length(hmiscgamfull.trainPredict)
+
+caret::confusionMatrix(table(hmiscgamfull.trainPredict, hmiscTrain$Alcoholic.Status))
+
+hmiscgamfull.predict <- predict(hmiscgamfull, hmiscTest)
+
+hmiscgamfull.predict[hmiscgamfull.predict > 0.5] <- 'Y'
+hmiscgamfull.predict[hmiscgamfull.predict != 'Y'] <- 'N'
+
+hmiscgamfull.predict <- as.data.frame(cbind("ID" = 1:30000, "Alcoholic.Status" = hmiscgamfull.predict))
+write.csv(hmiscgamfull.predict, file = "stapholz.jack_kaggle5.csv", row.names = FALSE)
+```
+
+```{R BIC}
+stepBIC.n <- dim(TrainSAData)[1]
+stepBIC.mFull <- lm(Alcoholic.Status == "Y" ~ ., data = TrainSAData)
+stepBIC.step <- step(stepBIC.mFull, direction = "backward", k = log(stepBIC.n))
+stepBIC.reducedModel <- lm(stepBIC.step$call, data = TrainSAData)
+anova(stepBIC.reducedModel, stepBIC.mFull)
+```
+
+
+```{R Hmisc 9, warning = FALSE}
+hmiscgamBIC <- gam(Alcoholic.Status == "Y" ~ sex + ns(age, 6) + ns(height, 6) + ns(weight, 6) + ns(DBP, 6) + ns(HDL_chole, 6) + ns(LDL_chole, 6) + ns(triglyceride, 6) + ns(hemoglobin, 6) + ns(SGOT_AST, 6) + ns(SGOT_ALT, 6) + ns(gamma_GTP, 6) + AGE.Category + Smoking.Status, data = hmiscTrain)
+par(mfrow = c(1, 3))
+plot(hmiscgamBIC, se = TRUE, col = "blue")
+summary(hmiscgamBIC)
+
+hmiscgamBIC.trainPredict <- predict(hmiscgamBIC, hmiscTrain)
+hmiscgamBIC.trainPredict[hmiscgamBIC.trainPredict > 0.5] <- 'Y'
+hmiscgamBIC.trainPredict[hmiscgamBIC.trainPredict != 'Y'] <- 'N'
+sum(hmiscgamBIC.trainPredict == hmiscTrain$Alcoholic.Status) / length(hmiscgamBIC.trainPredict)
+
+hmiscgamBIC.predict <- predict(hmiscgamBIC, hmiscTest)
+
+hmiscgamBIC.predict[hmiscgamBIC.predict > 0.5] <- 'Y'
+hmiscgamBIC.predict[hmiscgamBIC.predict != 'Y'] <- 'N'
+
+hmiscgamBIC.predict <- as.data.frame(cbind("ID" = 1:30000, "Alcoholic.Status" = hmiscgamBIC.predict))
+write.csv(hmiscgamBIC.predict, file = "stapholz.jack_kaggle8.csv", row.names = FALSE)
+```
+
+
+```{R}
+anova(hmisclm, hmiscgamfull)
+
+anova(hmiscgam3deg, hmiscgamfull)
+
+anova(hmiscgamBIC, hmiscgamfull)
+```
+
+
+
+
+
+# ```{R BIC TREE}
+# stepBIC.n <- dim(TrainSAData)[1]
+# stepBIC.mFull <- lm(Alcoholic.Status == "Y" ~ ., data = TrainSAData)
+# stepBIC.step <- step(stepBIC.mFull, direction = "backward", k = log(stepBIC.n))
+# stepBIC.reducedModel <- lm(stepBIC.step$call, data = TrainSAData)
+# anova(stepBIC.reducedModel, stepBIC.mFull)
+# 
+# 
+# tree.model <- tree(factor(Alcoholic.Status) ~ sex + age + height + weight + DBP + HDL_chole + LDL_chole + triglyceride + hemoglobin + SGOT_AST + SGOT_ALT + gamma_GTP + AGE.Category + Smoking.Status, data = TrainSAData)
+# tree.summary <- summary(tree.model)
+# plot(tree.model)
+# text(tree.model)
+# tree.predict <- data.frame("Alcoholic.Status" = predict(tree.model, TestSADataNoY))
+# tree.predict[tree.predict > 0.5] <- "Y"
+# tree.predict[tree.predict != "Y"] <- "N"
+# tree.predict <- cbind("ID" = 1:30000, tree.predict)
+# write.csv(tree.predict, file = "stapholz.jack_treetestkaggle.csv", row.names = FALSE)
+# 
+# tree.cv <- cv.tree(tree.model, FUN = prune.misclass)
+# names(tree.cv)
+# plot(tree.cv$dev ~ tree.cv$size)
+# tree.pruned <- prune.misclass(tree.model, best = 2)
+# plot(tree.pruned)
+# text(tree.pruned, pretty = TRUE)
+# summary(tree.pruned)
+# ```
+# 
+# ```{R ANN}
+# ann.train <- TrainSAData[, c(3:8, 11:24, 28)]
+# ann.maxs <- apply(ann.train[, -21], 2, max)
+# ann.mins <- apply(ann.train[, -21], 2, min)
+# ann.trainScaled <- as.data.frame(scale(ann.train[, -21], center = ann.mins, scale = ann.maxs-ann.mins))
+# summary(ann.trainScaled)
+# ann.trainScaled <- cbind(ann.trainScaled, "Alcoholic.Status" = ann.train[, 21])
+# 
+# #ann.nn <- neuralnet(Alcoholic.Status ~ age + height + weight + waistline + sight_left + sight_right + SBP + DBP + BLDS + tot_chole + HDL_chole + LDL_chole + triglyceride + hemoglobin + urine_protein + serum_creatinine + SGOT_AST + SGOT_ALT + gamma_GTP + BMI, data = ann.trainScaled, hidden = c(20, 14), linear.output = FALSE)
+# #ann.predicted <- neuralnet::compute(ann.nn, ann.trainScaled)
+# ```
+# 
+# 
+# 
+# 
+# ```{R}
+# hstepAIC.n <- dim(hmiscTrain)[1]
+# hstepAIC.mFull <- lm(Alcoholic.Status == "Y" ~ ., data = hmiscTrain)
+# hstepAIC.step <- step(hstepAIC.mFull, direction = "backward")
+# hstepAIC.reducedModel <- lm(hstepAIC.step$call, data = hmiscTrain)
+# anova(hstepAIC.reducedModel, hstepAIC.mFull)
+# 
+# hstepAIC.bothstep <- step(hstepAIC.mFull, direction = "both")
+# ```
+# 
+# ```{R Hmisc2}
+# hstepglm <- glm(hstepAIC.step$call, data = hmiscTrain)
+# hstepglm.predict <- predict(hstepglm, hmiscTrain)
+# hstepglm.predict[hstepglm.predict > 0.5] <- 'Y'
+# hstepglm.predict[hstepglm.predict != 'Y'] <- 'N'
+# 
+# table(hmiscTrain$Alcoholic.Status, hstepglm.predict)
+# (table(hmiscTrain$Alcoholic.Status, hstepglm.predict)[1, 2] + table(hmiscTrain$Alcoholic.Status, hstepglm.predict)[2, 1]) / sum(table(hmiscTrain$Alcoholic.Status, hstepglm.predict))
+# ```
+# 
+# ```{R Hmisc3}
+# hstepgam <- gam(Alcoholic.Status == "Y" ~ sex + ns(age, 3) + ns(height, 3) + ns(sight_left, 3) + ns(DBP, 3) + ns(HDL_chole, 3) + ns(LDL_chole, 3) + ns(triglyceride, 3) + ns(hemoglobin, 3) + ns(urine_protein, 3) + ns(serum_creatinine, 3) + ns(SGOT_AST, 3) + ns(SGOT_ALT, 3) + ns(gamma_GTP, 3) + ns(BMI, 3) + BMI.Category + AGE.Category + Smoking.Status, data = hmiscTrain)
+# par(mfrow = c(1, 3))
+# #plot(hstepgam, se = TRUE, col = "blue")
+# summary(hstepgam)
+# 
+# hstepgam.trainPredict <- predict(hstepgam, hmiscTrain)
+# hstepgam.trainPredict[hstepgam.trainPredict > 0.5] <- 'Y'
+# hstepgam.trainPredict[hstepgam.trainPredict != 'Y'] <- 'N'
+# sum(hstepgam.trainPredict == hmiscTrain$Alcoholic.Status)
+# 
+# hstepgam.predict <- predict(hstepgam, hmiscTest)
+# 
+# hstepgam.predict[hstepgam.predict > 0.5] <- 'Y'
+# hstepgam.predict[hstepgam.predict != 'Y'] <- 'N'
+# 
+# hstepgam.predict <- as.data.frame(cbind("ID" = 1:30000, "Alcoholic.Status" = hstepgam.predict))
+# write.csv(hstepgam.predict, file = "stapholz.jack_kaggle1.csv", row.names = FALSE)
+# ```
+# 
+# 
+# 
+# 
+# ```{R Hmisc 5}
+# hstepgamfull <- gam(Alcoholic.Status == "Y" ~ sex + ns(age, 5) + ns(height, 5) + ns(weight, 5) + ns(waistline, 5) + ns(sight_left, 5) + ns(sight_right, 5) + hear_left + hear_right + ns(SBP, 5) + ns(DBP, 5) + ns(BLDS, 5) + ns(tot_chole, 5) + ns(HDL_chole, 5) + ns(LDL_chole, 5) + ns(triglyceride, 5) + ns(hemoglobin, 5) + ns(urine_protein, 5) + ns(serum_creatinine, 5) + ns(SGOT_AST, 5) + ns(SGOT_ALT, 5) + ns(gamma_GTP, 5) + ns(BMI, 5) + BMI.Category + AGE.Category + Smoking.Status, data = hmiscTrain)
+# par(mfrow = c(1, 3))
+# plot(hstepgamfull, se = TRUE, col = "blue")
+# summary(hstepgamfull)
+# 
+# hstepgamfull.trainPredict <- predict(hstepgamfull, hmiscTrain)
+# hstepgamfull.trainPredict[hstepgamfull.trainPredict > 0.5] <- 'Y'
+# hstepgamfull.trainPredict[hstepgamfull.trainPredict != 'Y'] <- 'N'
+# sum(hstepgamfull.trainPredict == hmiscTrain$Alcoholic.Status)
+# 
+# hstepgamfull.predict <- predict(hstepgamfull, hmiscTest)
+# 
+# hstepgamfull.predict[hstepgamfull.predict > 0.5] <- 'Y'
+# hstepgamfull.predict[hstepgamfull.predict != 'Y'] <- 'N'
+# 
+# hstepgamfull.predict <- as.data.frame(cbind("ID" = 1:30000, "Alcoholic.Status" = hstepgamfull.predict))
+# write.csv(hstepgamfull.predict, file = "stapholz.jack_kaggle3.csv", row.names = FALSE)
+# ```
+# 
+# 
+# ```{R Hmisc6}
+# hstepgam <- gam(Alcoholic.Status == "Y" ~ sex + ns(age, 5) + ns(height, 5) + ns(sight_left, 5) + ns(DBP, 5) + ns(HDL_chole, 5) + ns(LDL_chole, 5) + ns(triglyceride, 5) + ns(hemoglobin, 5) + ns(urine_protein, 5) + ns(serum_creatinine, 5) + ns(SGOT_AST, 5) + ns(SGOT_ALT, 5) + ns(gamma_GTP, 5) + ns(BMI, 5) + BMI.Category + AGE.Category + Smoking.Status, data = hmiscTrain)
+# par(mfrow = c(1, 3))
+# #plot(hstepgam, se = TRUE, col = "blue")
+# summary(hstepgam)
+# 
+# hstepgam.trainPredict <- predict(hstepgam, hmiscTrain)
+# hstepgam.trainPredict[hstepgam.trainPredict > 0.5] <- 'Y'
+# hstepgam.trainPredict[hstepgam.trainPredict != 'Y'] <- 'N'
+# sum(hstepgam.trainPredict == hmiscTrain$Alcoholic.Status)
+# 
+# hstepgam.predict <- predict(hstepgam, hmiscTest)
+# 
+# hstepgam.predict[hstepgam.predict > 0.5] <- 'Y'
+# hstepgam.predict[hstepgam.predict != 'Y'] <- 'N'
+# 
+# hstepgam.predict <- as.data.frame(cbind("ID" = 1:30000, "Alcoholic.Status" = hstepgam.predict))
+# write.csv(hstepgam.predict, file = "stapholz.jack_kaggle4.csv", row.names = FALSE)
+# ```
+# 
+# 
+# 
+# ```{R Hmisc 7}
+# hmiscgamfull <- gam(Alcoholic.Status == "Y" ~ sex + ns(age, 1) + ns(height, 2) + ns(weight, 3) + ns(waistline, 3) + ns(sight_left, 2) + ns(sight_right, 4) + hear_left + hear_right + ns(SBP, 2) + ns(DBP, 3) + ns(BLDS, 3) + ns(tot_chole, 2) + ns(HDL_chole, 3) + ns(LDL_chole, 1) + ns(triglyceride, 2) + ns(hemoglobin, 3) + ns(urine_protein, 1) + ns(serum_creatinine, 2) + ns(SGOT_AST, 1) + ns(SGOT_ALT, 2) + ns(gamma_GTP, 2) + ns(BMI, 2) + BMI.Category + AGE.Category + Smoking.Status, data = hmiscTrain)
+# par(mfrow = c(1, 3))
+# #plot(hmiscgamfull, se = TRUE, col = "blue")
+# summary(hmiscgamfull)
+# 
+# hmiscgamfull.trainPredict <- predict(hmiscgamfull, hmiscTrain)
+# hmiscgamfull.trainPredict[hmiscgamfull.trainPredict > 0.5] <- 'Y'
+# hmiscgamfull.trainPredict[hmiscgamfull.trainPredict != 'Y'] <- 'N'
+# sum(hmiscgamfull.trainPredict == hmiscTrain$Alcoholic.Status)
+# 
+# hmiscgamfull.predict <- predict(hmiscgamfull, hmiscTest)
+# 
+# hmiscgamfull.predict[hmiscgamfull.predict > 0.5] <- 'Y'
+# hmiscgamfull.predict[hmiscgamfull.predict != 'Y'] <- 'N'
+# 
+# hmiscgamfull.predict <- as.data.frame(cbind("ID" = 1:30000, "Alcoholic.Status" = hmiscgamfull.predict))
+# write.csv(hmiscgamfull.predict, file = "stapholz.jack_kaggle55.csv", row.names = FALSE)
+# ```
+# 
+# 
+# 
+# 
+# ```{R Hmisc 8}
+# hstepgamfull <- gam(Alcoholic.Status == "Y" ~ sex + ns(age, 7) + ns(height, 7) + ns(weight, 7) + ns(waistline, 7) + ns(sight_left, 7) + ns(sight_right, 7) + hear_left + hear_right + ns(SBP, 7) + ns(DBP, 7) + ns(BLDS, 7) + ns(tot_chole, 7) + ns(HDL_chole, 7) + ns(LDL_chole, 7) + ns(triglyceride, 7) + ns(hemoglobin, 7) + ns(urine_protein, 7) + ns(serum_creatinine, 7) + ns(SGOT_AST, 7) + ns(SGOT_ALT, 7) + ns(gamma_GTP, 7) + ns(BMI, 7) + BMI.Category + AGE.Category + Smoking.Status, data = hmiscTrain)
+# par(mfrow = c(1, 3))
+# plot(hstepgamfull, se = TRUE, col = "blue")
+# summary(hstepgamfull)
+# 
+# hstepgamfull.trainPredict <- predict(hstepgamfull, hmiscTrain)
+# hstepgamfull.trainPredict[hstepgamfull.trainPredict > 0.5] <- 'Y'
+# hstepgamfull.trainPredict[hstepgamfull.trainPredict != 'Y'] <- 'N'
+# sum(hstepgamfull.trainPredict == hmiscTrain$Alcoholic.Status)
+# 
+# hstepgamfull.predict <- predict(hstepgamfull, hmiscTest)
+# 
+# hstepgamfull.predict[hstepgamfull.predict > 0.5] <- 'Y'
+# hstepgamfull.predict[hstepgamfull.predict != 'Y'] <- 'N'
+# 
+# hstepgamfull.predict <- as.data.frame(cbind("ID" = 1:30000, "Alcoholic.Status" = hstepgamfull.predict))
+# write.csv(hstepgamfull.predict, file = "stapholz.jack_kaggle6.csv", row.names = FALSE)
+# ```
+# 
+# 
+# 
+# 
+# 
+# ```{R Hmisc 9}
+# hmiscTrainNumerical <- hmiscTrain[, c(2:7, 10:23, 27)]
+# hmiscTestNumerical <- hmiscTest[, c(2:7, 10:23)]
+# 
+# hmiscpca <- princomp(hmiscTrainNumerical[, -21], center = TRUE, scale = TRUE)
+# summary(hmiscpca)
+# Use 5 comp
+# hmiscpca$loadings
+# head(hmiscpca$scores)
+# hmiscTrainComp <- as.data.frame(hmiscpca$scores[, 1:4])
+# 
+# 
+# ann.maxs <- apply(hmiscTrainComp, 2, max)
+# ann.mins <- apply(hmiscTrainComp, 2, min)
+# ann.trainScaled <- as.data.frame(scale(hmiscTrainComp, center = ann.mins, scale = ann.maxs-ann.mins))
+# summary(ann.trainScaled)
+# ann.trainScaled <- cbind(ann.trainScaled, "Alcoholic.Status" = hmiscTrain[, 27])
+# 
+# ann.nn <- neuralnet(Alcoholic.Status == "Y" ~ Comp.1 + Comp.2 + Comp.3 + Comp.4, data = ann.trainScaled[1:700, ], hidden = c(4, 2), linear.output = FALSE)
+# ann.predicted <- neuralnet::compute(ann.nn, ann.trainScaled)
+# ann.predictedResults <- ann.predicted$net.result
+# ann.predictedResults[ann.predicted$net.result > 0.5] <- 'Y'
+# ann.predictedResults[ann.predicted$net.result != 'Y'] <- 'N'
+# 
+# sum(ann.predictedResults == hmiscTrain$Alcoholic.Status)
+# ```
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# ```{R}
+# kag5 <- read.csv("../Group Project/stapholz.jack_kaggle5.csv")
+# kag55 <- read.csv("../Group Project/stapholz.jack_kaggle55.csv")
+# 
+# sum(kag5$Alcoholic.Status == kag55$Alcoholic.Status)
+# ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
